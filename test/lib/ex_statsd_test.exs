@@ -55,6 +55,14 @@ defmodule ExStatsDTest do
 
       assert sent(:the_name) == ["test.items:100|c"]
     end
+
+    test "merges system tags with context tags" do
+      options = [tags: ~w(a b)]
+      {:ok, _pid} = ExStatsD.start_link(options)
+
+      ExStatsD.increment("tags", tags: ~w(b c))
+      assert sent() == ["test.tags:1|c|#a,b,c"]
+    end
   end
 
   describe "with default options" do

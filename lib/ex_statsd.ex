@@ -17,6 +17,7 @@ defmodule ExStatsD do
   @default_port 8125
   @default_host "127.0.0.1"
   @default_namespace nil
+  @default_tags []
   @default_sink nil
   @timing_stub 1.234
 
@@ -30,18 +31,21 @@ defmodule ExStatsD do
   @type sink :: String.t
   @type name :: String.t
   @type namespace :: String.t
+  @type tags :: List
   @type options :: [
     port: statsd_port,
     host: host,
     namespace: namespace,
     sink: sink,
-    name: name
+    name: name,
+    tags: tags
   ]
   @spec start_link(options) :: {:ok, pid}
   def start_link(options \\ []) do
     state = %{port:      Keyword.get(options, :port, Config.get(:port, @default_port)),
               host:      Keyword.get(options, :host, Config.get(:host, @default_host)) |> parse_host,
               namespace: Keyword.get(options, :namespace, Config.get(:namespace, @default_namespace)),
+              tags:      Keyword.get(options, :tags, Config.get(:tags, @default_tags)),
               sink:      Keyword.get(options, :sink, Config.get(:sink, @default_sink)),
               socket:    nil}
     GenServer.start_link(__MODULE__, state, Keyword.merge([name: __MODULE__], options))
@@ -301,19 +305,25 @@ defmodule ExStatsD do
   defp stat_name(key, nil), do: key
   defp stat_name(key, namespace), do: "#{namespace}.#{key}"
 
+  defp merge_tags(tags, %{tags: static_tags}) do
+    tags
+     |> Enum.into(static_tags)
+     |> Enum.uniq
+  end
+
   # SERVER
 
   @doc false
   def handle_cast({:transmit, message, options, sample_rate}, %{sink: sink} = state) when is_list(sink) do
     tags = Keyword.get(options, :tags, [])
-    pkt = message |> packet(state.namespace, tags, sample_rate)
+    pkt = message |> packet(state.namespace, merge_tags(tags, state), sample_rate)
     {:noreply, %{state | sink: [pkt | sink]}}
   end
 
   @doc false
   def handle_cast({:transmit, message, options, sample_rate}, state) do
     tags = Keyword.get(options, :tags, [])
-    pkt = message |> packet(state.namespace, tags, sample_rate)
+    pkt = message |> packet(state.namespace, merge_tags(tags, state), sample_rate)
     {:ok, socket} = :gen_udp.open(0, [:binary])
     :gen_udp.send(socket, state.host, state.port, pkt)
     :gen_udp.close(socket)
