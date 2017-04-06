@@ -323,15 +323,29 @@ defmodule ExStatsD do
   @doc false
   def handle_cast({:transmit, message, options, sample_rate}, state) do
     tags = Keyword.get(options, :tags, [])
+    state = maybe_open_socket(state)
     pkt = message |> packet(state.namespace, merge_tags(tags, state), sample_rate)
-    {:ok, socket} = :gen_udp.open(0, [:binary])
-    :gen_udp.send(socket, state.host, state.port, pkt)
-    :gen_udp.close(socket)
+    :gen_udp.send(state.socket, pkt)
     {:noreply, state}
   end
 
   @doc false
   def handle_call(:flush, _from, state) do
     {:reply, :ok, state}
+  end
+
+  @doc false
+  # It's UDP. We make a best effort and ignore any errors/responses.
+  def handle_info({:udp, _, _, _, _}, state),       do: {:noreply, state}
+  def handle_info({:udp_error, _, _}, state), do: {:noreply, state}
+
+  defp maybe_open_socket(state) do
+    if Map.get(state, :socket) == nil do
+      {:ok, socket} = :gen_udp.open(0, [:binary])
+      :ok = :gen_udp.connect(socket, state.host, state.port)
+      %{state | socket: socket}
+    else
+      state
+    end
   end
 end
